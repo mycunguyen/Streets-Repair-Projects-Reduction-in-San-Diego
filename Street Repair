@@ -1,0 +1,162 @@
+---
+title: "Time Analysis Final Project"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r}
+#uploading the files that are needed
+
+library(readxl)
+library(creditmodel)
+library(zoo)
+library(fpp2)
+library(readr)
+library(dplyr)
+library(tibble)
+```
+
+```{r}
+#running the dataset
+
+df <- read_csv('/Users/vannesasalazar/Documents/ADS506/sd_paving_datasd_v1.csv', 
+    col_types = cols(date_moratorium = col_date(format = "%Y-%m-%d"), 
+        date_start = col_date(format = "%Y-%m-%d"), 
+        date_end = col_date(format = "%Y-%m-%d")))
+
+head(df)
+```
+
+```{r}
+#EDA on the dataset
+
+barplot(table(df$status))
+barplot(table(df$project_id))
+barplot(table(df$type))
+hist(df$length)
+hist(df$width)
+scatter.smooth(df$length,df$width)
+```
+
+```{r}
+#preprocessing by average
+
+df$num_days <- as.Date(df$date_end) - as.Date(df$date_start)
+
+df_gb <- df %>% group_by(date_start) %>%
+                   summarise(average_length = mean(length),
+                             average_width = mean(width),
+                             adverage_paving_miles = mean(paving_miles),
+                             average_num_days = mean(num_days),
+                             .groups = 'drop')
+head(df_gb)
+dim(df_gb)
+```
+
+```{r}
+# arima model with average preprocessed
+dfts_gb <- ts(df_gb$average_num_days)
+autoplot(dfts_gb)
+dfts_train_gb <- window(dfts_gb, end = 1713)
+dfts_test_gb <- window(dfts_gb, start = 1714, end = 1725)
+length(dfts_test_gb)
+auto_model <-auto.arima(dfts_train_gb)
+summary(auto_model)
+```
+
+graph showing the average length of the road project for the different time
+
+```{r}
+#forecasted values, and predictions on the test set
+
+prediction <- forecast(auto_model, h= 12)
+accuracy(prediction, dfts_test_gb)
+
+```
+
+This forecasting is shows the percentiles, but the point forecast is the important part. It is showing forecast of the average road project duration for the next 12 days.
+
+```{r}
+#naive model is used in predicting because the simplest model is typically the best model.
+naive_model <- naive(dfts_train_gb, h = 5, level = 95)
+```
+
+```{r}
+#seasonal naive model used to ensure any seasonality.
+sn_model <- snaive(dfts_train_gb, h = 5)
+```
+
+```{r}
+#Linear model with the use of trend, as no seasonality was determined.
+st_model <- tslm(dfts_train_gb ~ trend)
+summary(st_model)
+```
+
+```{r}
+#forecasted values for the linear model.
+
+st_model_predict <- forecast(st_model, h = 5)
+
+```
+
+```{r}
+
+#accuracy results for the linear, naive, and seasonal naive models. 
+
+accuracy(st_model_predict)
+accuracy(naive_model)
+accuracy(sn_model)
+
+
+mean(abs(naive_model$residuals), na.rm = T)
+
+sqrt(mean(naive_model$residuals^2, na.rm = T))
+```
+
+```{r}
+#holt winter exponential smoothing
+holt_model <-holt(dfts_train_gb)
+summary(holt_model)
+```
+
+```{r}
+#accuracy of the holt winter exponential smoothing. 
+
+accuracy(holt_model)
+```
+
+```{r}
+#simple exponential smoothing
+ses_model <-ses(dfts_train_gb)
+summary(ses_model)
+```
+
+```{r}
+
+#accuracy of the simple exponential smoothing model.
+
+accuracy(ses_model)
+```
+
+```{r}
+#moving average is used due to the trend that was found in the data. 
+ma_model <-rollmean(dfts_train_gb,k = 10)
+summary(ma_model)
+
+autoplot(dfts_gb, series = "Average Duration") +
+  autolayer(ma_model, series = "Moving Average")+
+  labs(title = "Completion Time of Road Repairs",
+       x = "Time",
+       y = " Completion Times") +
+  guides(color = guide_legend(title = "Series")) +
+  scale_color_manual(values = c(`Average Duration` = "black", `Moving Average` = "green")) +
+  theme_classic()
+```
+
+```{r}
+#reviewing the fit of the moving average model. 
+tail(data.frame(ma_model))
+```
+
+In moving average, the last value is the forecast for all times, and in this one, it is 0 proving that model is not fit for this dataset.
